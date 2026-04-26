@@ -1,0 +1,13 @@
+{
+  "name": "@openchat/supabase",
+  "private": true,
+  "scripts": {
+    "start": "supabase start",
+    "stop": "supabase stop",
+    "status": "supabase status",
+    "db:reset": "supabase db reset"
+  },
+  "devDependencies": {
+    "supabase": "^2.49.1"
+  }
+}

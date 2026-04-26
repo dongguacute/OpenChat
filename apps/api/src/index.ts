@@ -1,7 +1,8 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
+import { isSupabaseConfigured, supabaseMiddleware, type HonoSupabase } from './db/config'
 
-const app = new Hono()
+const app = new Hono<{ Variables: { supabase: HonoSupabase | null } }>()
   .basePath('/api')
   .use(
     '/*',
@@ -15,8 +16,14 @@ const app = new Hono()
       allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     }),
   )
+  .use('/*', supabaseMiddleware)
   .get('/health', (c) =>
-    c.json({ ok: true, service: 'openchat-api', time: new Date().toISOString() }),
+    c.json({
+      ok: true,
+      service: 'openchat-api',
+      time: new Date().toISOString(),
+      supabase: isSupabaseConfigured(),
+    }),
   )
   .get('/version', (c) => c.json({ version: '0.1.0' }))
 

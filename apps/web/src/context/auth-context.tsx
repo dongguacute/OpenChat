@@ -16,6 +16,7 @@ export type StoredRole = 'admin' | 'user'
 type Session = {
   role: StoredRole
   email: string
+  userId: string | null
 }
 
 type AuthContextValue = {
@@ -23,6 +24,8 @@ type AuthContextValue = {
   isAuthenticated: boolean
   role: StoredRole | null
   email: string | undefined
+  /** Supabase 用户 id（`role === 'user'` 时与 JWT `sub` 一致） */
+  userId: string | null
   login: (email: string, password: string) => Promise<void>
   logout: () => Promise<void>
 }
@@ -62,7 +65,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const me = await apiFetch<MeResponse>('/api/me')
         if (cancelled || current() !== genAtStart) return
-        setSession({ role: me.role, email: me.email })
+        setSession({ role: me.role, email: me.email, userId: me.id })
       } catch {
         if (cancelled || current() !== genAtStart) return
         setSession(null)
@@ -86,7 +89,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           method: 'POST',
           body: JSON.stringify({ email: emailIn, password }),
         })
-        setSession({ role: res.role, email: res.email })
+        setSession({
+          role: res.role,
+          email: res.email,
+          userId: res.role === 'user' && res.id ? res.id : null,
+        })
       } finally {
         setAuthReady(true)
       }
@@ -111,6 +118,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isAuthenticated: Boolean(session),
       role: session?.role ?? null,
       email: session?.email,
+      userId: session?.userId ?? null,
       login,
       logout,
     }),

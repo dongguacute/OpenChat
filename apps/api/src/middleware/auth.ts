@@ -32,6 +32,24 @@ export const requireAuth = createMiddleware<{ Variables: AppVariables }>(
   },
 )
 
+/** 有则解析 JWT 写入 `user`，无/无效也继续，供允许匿名 + 已登录 双式路由。 */
+export const optionalAuth = createMiddleware<{ Variables: AppVariables }>(
+  async (c, next) => {
+    const fromHeader = getBearerToken(c.req.header('Authorization'))
+    const fromCookie = getCookie(c, ACCESS_COOKIE_NAME)
+    const token = fromHeader ?? fromCookie
+    if (token) {
+      try {
+        const user = await verifyAccessToken(token)
+        c.set('user', user)
+      } catch {
+        // ignore 无效 token，当作未登录
+      }
+    }
+    await next()
+  },
+)
+
 export const requireAdmin = createMiddleware<{ Variables: AppVariables }>(
   async (c, next) => {
     const user = c.get('user')

@@ -7,6 +7,7 @@ import {
   poolForDirectDb,
   shouldSkipChatTableBootstrap,
   CHAT_MESSAGES_TABLE,
+  CHAT_ROOM_PARTICIPANTS_TABLE,
   CHAT_ROOMS_TABLE,
 } from './config'
 
@@ -175,11 +176,66 @@ export async function ensureChatRoomInsertPolicy(): Promise<void> {
 /**
  * 启动时调用的总入口
  */
+/**
+ * 私聊参与方，用于在「我的会话」列表中展示；已有库在启动时补建。
+ */
+export async function ensureChatRoomParticipantsTable(): Promise<void> {
+  const pool = poolForDirectDb()
+  if (!pool) return
+  try {
+    const { rows: t } = await pool.query<{ exists: boolean }>(
+      `SELECT EXISTS (
+        SELECT 1
+        FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = $1
+      ) AS exists`,
+      [CHAT_ROOM_PARTICIPANTS_TABLE],
+    )
+    if (t[0]?.exists) {
+      return
+    }
+    const client = await pool.connect()
+    try {
+      await client.query('BEGIN')
+      await client.query(`
+        CREATE TABLE public.chat_room_participants (
+          room_id uuid NOT NULL REFERENCES public.chat_rooms (id) ON DELETE CASCADE,
+          user_id uuid NOT NULL REFERENCES public.profiles (id) ON DELETE CASCADE,
+          created_at timestamptz NOT NULL DEFAULT now(),
+          PRIMARY KEY (room_id, user_id)
+        );
+        CREATE INDEX chat_room_participants_user_id
+          ON public.chat_room_participants (user_id);
+        COMMENT ON TABLE public.chat_room_participants IS '谁在该房间，用于会话列表与鉴权';
+      `)
+      await client.query('COMMIT')
+    } catch (e) {
+      try {
+        await client.query('ROLLBACK')
+      } catch {
+        // ignore
+      }
+      throw e
+    } finally {
+      client.release()
+    }
+    console.info(`[db/init] 已创建 ${CHAT_ROOM_PARTICIPANTS_TABLE}`)
+  } catch (e) {
+    console.error('[db/init] chat_room_participants 创建失败:', e)
+    throw e
+  } finally {
+    await pool.end()
+  }
+}
+
 export async function ensureDemoSchema(): Promise<void> {
   await ensureChatSchema().catch((err) => {
     console.warn('[db/init] 聊天表可稍后重试', err)
   })
   await ensureChatRoomInsertPolicy().catch((err) => {
     console.warn('[db/init] chat_rooms 插入策略可稍后重试', err)
+  })
+  await ensureChatRoomParticipantsTable().catch((err) => {
+    console.error('[db/init] chat_room_participants 未创建成功（会话列表会失败）:', err)
   })
 }

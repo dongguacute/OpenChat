@@ -24,6 +24,11 @@ export function AppLayout() {
                 登录
               </NavLink>
             )}
+            {authReady && isAuthenticated && role === 'user' && (
+              <NavLink to="/chat" className={linkClass}>
+                私聊
+              </NavLink>
+            )}
             {authReady && isAuthenticated && role === 'admin' && (
               <NavLink to="/admin" className={linkClass}>
                 管理

@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { createClient, type SupabaseClient } from '@supabase/supabase-js'
+import { createServiceSupabase } from '../lib/supabase-service'
 import { requireAdmin, requireAuth, type AppVariables } from '../middleware/auth'
 
 export interface CreateUserRequest {
@@ -10,20 +10,6 @@ export interface CreateUserRequest {
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-
-function createServiceSupabase(): SupabaseClient | null {
-  const url = process.env.SUPABASE_URL?.trim()
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()
-  if (!url || !serviceKey) {
-    return null
-  }
-  return createClient(url, serviceKey, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-  })
-}
 
 function parsePageParams(c: { req: { query: (k: string) => string | undefined } }): {
   page: number

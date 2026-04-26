@@ -3,8 +3,12 @@ import { cors } from 'hono/cors'
 import { isSupabaseConfigured, supabaseMiddleware } from './db/config'
 import type { AppVariables } from './middleware/auth'
 import { requireAuth } from './middleware/auth'
-import { clearAccessTokenCookie } from './lib/auth-cookie'
+import {
+  clearAccessTokenCookie,
+  clearSupabaseRefreshCookie,
+} from './lib/auth-cookie'
 import { admin } from './routes/admin'
+import { chatroom } from './routes/chatroom'
 import { login } from './routes/login'
 
 const app = new Hono<{ Variables: AppVariables }>()
@@ -38,16 +42,19 @@ const app = new Hono<{ Variables: AppVariables }>()
       return c.json({ error: 'Unauthorized' }, 401)
     }
     return c.json({
+      id: user.role === 'user' && user.sub ? user.sub : null,
       role: user.role,
       email: user.email ?? '',
     })
   })
   .post('/logout', (c) => {
     clearAccessTokenCookie(c)
+    clearSupabaseRefreshCookie(c)
     return c.json({ ok: true })
   })
   .route('/login', login)
   .route('/admin', admin)
+  .route('/chat', chatroom)
 
 export { app }
 export type App = typeof app

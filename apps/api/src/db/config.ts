@@ -26,6 +26,7 @@ export const supabaseMiddleware = createMiddleware<{ Variables: AppVariables }>(
 /** 与 DDL 中一致为 `chat_rooms`（非单数 chat_room） */
 export const CHAT_ROOMS_TABLE = 'chat_rooms'
 export const CHAT_MESSAGES_TABLE = 'chat_messages'
+export const CHAT_ROOM_PARTICIPANTS_TABLE = 'chat_room_participants'
 
 export function poolForDirectDb(): Pool | null {
   const connectionString = process.env.DATABASE_URL?.trim()

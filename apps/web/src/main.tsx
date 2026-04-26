@@ -5,6 +5,7 @@ import './index.css'
 import { AuthProvider } from './context/auth-context'
 import { AdminUsersPage } from './routes/admin-users'
 import { AppLayout } from './routes/app-layout'
+import { ChatPage } from './routes/chat-page'
 import { HomePage } from './routes/home'
 import { LoginPage } from './routes/login-page'
 import { NotFound } from './routes/not-found'
@@ -19,6 +20,7 @@ const router = createBrowserRouter([
     ),
     children: [
       { path: '/', element: <HomePage /> },
+      { path: '/chat', element: <ChatPage /> },
       { path: '/login', element: <LoginPage /> },
       {
         element: <RequireAdmin />,

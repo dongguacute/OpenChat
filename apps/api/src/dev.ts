@@ -6,6 +6,9 @@ const apiRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 loadEnv({ path: resolve(apiRoot, '.env') })
 loadEnv({ path: resolve(apiRoot, '.env.local') })
 
+const { ensureDemoSchema } = await import('./db/init')
+await ensureDemoSchema()
+
 const { serve } = await import('@hono/node-server')
 const { app } = await import('./index')
 

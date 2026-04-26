@@ -11,9 +11,12 @@ export type VersionResponse = { version: string }
 export type LoginResponse = {
   role: 'admin' | 'user'
   email: string
+  id: string | null
 }
 
-export type MeResponse = LoginResponse
+export type MeResponse = {
+  id: string | null
+} & LoginResponse
 
 export type AdminUserRow = {
   id: string
@@ -39,3 +42,36 @@ export type CreateUserResponse = {
   id: string
   email: string
 }
+
+export type ChatSupabaseTokenResponse = {
+  access_token: string
+  refresh_token: string
+  expires_in: number
+  token_type: 'bearer'
+}
+
+export type ChatOpenResponse = {
+  room: { id: string; name: string }
+  peer: { id: string; email: string; display_name: string | null }
+}
+
+export type ChatRoomListItem = {
+  id: string
+  name: string
+  created_at: string
+  peer: { email: string; display_name: string | null }
+}
+
+export type ChatRoomsResponse = { rooms: ChatRoomListItem[] }
+
+export type ChatMessageRow = {
+  id: string
+  room_id: string
+  user_id: string
+  content: string
+  created_at: string
+}
+
+export type ChatMessagesResponse = { messages: ChatMessageRow[] }
+
+export type ChatPostMessageResponse = { message: ChatMessageRow }

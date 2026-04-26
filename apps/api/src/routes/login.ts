@@ -1,7 +1,11 @@
 import { Hono } from 'hono'
 import { timingSafeEqual } from 'node:crypto'
 import type { AppVariables } from '../middleware/auth'
-import { setAccessTokenCookie } from '../lib/auth-cookie'
+import {
+  setAccessTokenCookie,
+  setSupabaseRefreshCookie,
+} from '../lib/auth-cookie'
+import { createServiceSupabase } from '../lib/supabase-service'
 import { signAccessToken } from '../lib/jwt'
 
 export interface LoginRequest {
@@ -13,6 +17,8 @@ export interface LoginRequest {
 export interface LoginResponse {
   role: 'admin' | 'user'
   email: string
+  /** 普通用户为 Supabase `user.id`；管理账号为 `null`。 */
+  id: string | null
 }
 
 function safeEqualString(a: string, b: string): boolean {
@@ -63,6 +69,7 @@ login.post('/', async (c) => {
     return c.json({
       role: 'admin' satisfies LoginResponse['role'],
       email: normEmail,
+      id: null,
     })
   }
 
@@ -86,9 +93,27 @@ login.post('/', async (c) => {
     email: userEmail,
   })
   setAccessTokenCookie(c, token)
+  if (data.session?.refresh_token) {
+    setSupabaseRefreshCookie(c, data.session.refresh_token)
+  }
+  const service = createServiceSupabase()
+  if (service) {
+    const { error: pErr } = await service.from('profiles').upsert(
+      {
+        id: data.user.id,
+        email: userEmail,
+        display_name: null,
+      },
+      { onConflict: 'id' },
+    )
+    if (pErr) {
+      console.warn('[login] profile upsert:', pErr.message)
+    }
+  }
   return c.json({
     role: 'user' satisfies LoginResponse['role'],
     email: userEmail,
+    id: data.user.id,
   })
 })
 

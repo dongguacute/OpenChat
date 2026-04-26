@@ -8,10 +8,10 @@
     "typecheck": "turbo run typecheck",
     "lint": "eslint .",
     "supabase": "cd packages/supabase && ./node_modules/.bin/supabase",
-    "db:start": "pnpm run supabase start",
-    "db:stop": "pnpm run supabase stop",
-    "db:status": "pnpm run supabase status",
-    "db:reset": "pnpm run supabase -- db reset"
+    "db:start": "pnpm -C packages/supabase start",
+    "db:stop": "pnpm -C packages/supabase run stop",
+    "db:status": "pnpm -C packages/supabase run status",
+    "db:reset": "pnpm -C packages/supabase run reset"
   },
   "devDependencies": {
     "@eslint/js": "^9.19.0",

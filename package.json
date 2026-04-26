@@ -10,7 +10,8 @@
     "supabase": "cd packages/supabase && ./node_modules/.bin/supabase",
     "db:start": "pnpm run supabase start",
     "db:stop": "pnpm run supabase stop",
-    "db:status": "pnpm run supabase status"
+    "db:status": "pnpm run supabase status",
+    "db:reset": "pnpm run supabase -- db reset"
   },
   "devDependencies": {
     "@eslint/js": "^9.19.0",

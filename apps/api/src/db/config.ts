@@ -1,74 +1,69 @@
-import { config as loadEnv } from "dotenv";
-import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { createMiddleware } from "hono/factory";
+import { createMiddleware } from 'hono/factory'
+import { createClient, type SupabaseClient } from '@supabase/supabase-js'
+import { Pool } from 'pg'
 
-const apiRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-loadEnv({ path: resolve(apiRoot, ".env") });
-loadEnv({ path: resolve(apiRoot, ".env.local") });
-
-/**
- * 从环境变量读取的 Supabase 配置（Hono 进程侧使用）。
- * 本地可与 `packages/supabase` 中 `supabase status` 输出的 URL / 密钥 对应。
- */
-export const supabaseConfig = {
-  url: process.env.SUPABASE_URL ?? "",
-  anonKey: process.env.SUPABASE_ANON_KEY ?? "",
-  /** 仅服务端使用，切勿下发给客户端 */
-  serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
-} as const;
-
-const clientOptions = {
-  auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-} as const;
+const supabaseUrl = process.env.SUPABASE_URL?.trim()
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY?.trim()
 
 export function isSupabaseConfigured(): boolean {
-  return Boolean(supabaseConfig.url && supabaseConfig.anonKey);
+  return Boolean(supabaseUrl && supabaseAnonKey)
 }
 
-export type HonoSupabase = {
-  /** 携带 `Authorization: Bearer`（若存在），供 PostgREST RLS 使用 */
-  withAuth: SupabaseClient;
-  /** 匿名，无用户会话 */
-  anon: SupabaseClient;
-  /** 使用 service role 时可用（需配置 SUPABASE_SERVICE_ROLE_KEY） */
-  admin: SupabaseClient | null;
-};
+export type HonoSupabase = SupabaseClient
 
-/**
- * 为单次请求准备 Supabase 客户端：有 Bearer 时将其传给 API，与「服务端按用户 JWT 访问」一致。
- * 未配置环境变量时返回 `null`（不抛错，便于仅跑 health 等无 DB 场景）。
- */
-export function getSupabaseForRequest(
-  authHeader: string | undefined,
-): HonoSupabase | null {
-  if (!isSupabaseConfigured()) return null;
-  const { url, anonKey, serviceRoleKey } = supabaseConfig;
+export const supabaseMiddleware = createMiddleware<{
+  Variables: { supabase: HonoSupabase | null }
+}>(async (c, next) => {
+  if (!isSupabaseConfigured()) {
+    c.set('supabase', null)
+  } else {
+    c.set('supabase', createClient(supabaseUrl!, supabaseAnonKey!))
+  }
+  await next()
+})
 
-  const anon = createClient(url, anonKey, clientOptions);
-  const withAuth = authHeader
-    ? createClient(url, anonKey, {
-        ...clientOptions,
-        global: { headers: { Authorization: authHeader } },
-      })
-    : anon;
+/** 与 DDL 中一致为 `chat_rooms`（非单数 chat_room） */
+export const CHAT_ROOMS_TABLE = 'chat_rooms'
+export const CHAT_MESSAGES_TABLE = 'chat_messages'
 
-  const admin =
-    serviceRoleKey && serviceRoleKey.length > 0
-      ? createClient(url, serviceRoleKey, clientOptions)
-      : null;
+export function poolForDirectDb(): Pool | null {
+  const connectionString = process.env.DATABASE_URL?.trim()
+  if (!connectionString) return null
+  return new Pool({
+    connectionString,
+    max: 1,
+    ssl:
+      /supabase\.co|pooler\./.test(connectionString) ||
+      process.env.DATABASE_SSL === '1'
+        ? { rejectUnauthorized: false }
+        : undefined,
+  })
+}
 
-  return { withAuth, anon, admin };
+export async function publicTableExists(
+  pool: Pool,
+  tableName: string,
+): Promise<boolean> {
+  const { rows } = await pool.query<{ exists: boolean }>(
+    `SELECT EXISTS (
+      SELECT 1
+      FROM information_schema.tables
+      WHERE table_schema = 'public' AND table_name = $1
+    ) AS exists`,
+    [tableName],
+  )
+  return Boolean(rows[0]?.exists)
 }
 
 /**
- * 在 Hono 中挂载，路由内通过 `c.get('supabase')` 使用；未配置时为 `null`。
- * App 上需带类型：`new Hono<{ Variables: { supabase: HonoSupabase | null } }>()`
+ * 启动时：若已同时存在 `chat_rooms` 与 `chat_messages`，则略过建表；否则由 init 中逻辑创建。
  */
-export const supabaseMiddleware = createMiddleware(async (c, next) => {
-  c.set("supabase", getSupabaseForRequest(c.req.header("Authorization")));
-  await next();
-});
-
-export type { SupabaseClient };
+export async function shouldSkipChatTableBootstrap(
+  pool: Pool,
+): Promise<boolean> {
+  const [hasRooms, hasMessages] = await Promise.all([
+    publicTableExists(pool, CHAT_ROOMS_TABLE),
+    publicTableExists(pool, CHAT_MESSAGES_TABLE),
+  ])
+  return hasRooms && hasMessages
+}

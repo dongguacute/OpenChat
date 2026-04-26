@@ -12,11 +12,13 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.49.0",
     "dotenv": "^17.4.2",
-    "hono": "^4.7.0"
+    "hono": "^4.7.0",
+    "pg": "^8.13.1"
   },
   "devDependencies": {
     "@hono/node-server": "^1.14.0",
     "@types/node": "^20.11.0",
+    "@types/pg": "^8.11.10",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   }

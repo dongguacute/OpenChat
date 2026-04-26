@@ -1,6 +1,13 @@
 import { createMiddleware } from 'hono/factory'
+import { getCookie } from 'hono/cookie'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { ACCESS_COOKIE_NAME } from '../lib/auth-cookie'
 import { verifyAccessToken, type JwtPayload } from '../lib/jwt'
+
+function getBearerToken(header: string | undefined): string | undefined {
+  const m = header?.match(/^Bearer\s+(\S+)/i)
+  return m?.[1]
+}
 
 export type AppVariables = {
   supabase: SupabaseClient | null
@@ -9,9 +16,9 @@ export type AppVariables = {
 
 export const requireAuth = createMiddleware<{ Variables: AppVariables }>(
   async (c, next) => {
-    const raw = c.req.header('Authorization')
-    const m = raw?.match(/^Bearer\s+(\S+)/i)
-    const token = m?.[1]
+    const fromHeader = getBearerToken(c.req.header('Authorization'))
+    const fromCookie = getCookie(c, ACCESS_COOKIE_NAME)
+    const token = fromHeader ?? fromCookie
     if (!token) {
       return c.json({ error: 'Unauthorized' }, 401)
     }

@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { timingSafeEqual } from 'node:crypto'
 import type { AppVariables } from '../middleware/auth'
+import { setAccessTokenCookie } from '../lib/auth-cookie'
 import { signAccessToken } from '../lib/jwt'
 
 export interface LoginRequest {
@@ -8,9 +9,10 @@ export interface LoginRequest {
   password: string
 }
 
+/** Body only (JWT is Set-Cookie HttpOnly). */
 export interface LoginResponse {
-  token: string
   role: 'admin' | 'user'
+  email: string
 }
 
 function safeEqualString(a: string, b: string): boolean {
@@ -51,12 +53,17 @@ login.post('/', async (c) => {
   }
 
   if (matchesEnvAdmin(email, password)) {
+    const normEmail = email.trim().toLowerCase()
     const token = await signAccessToken({
       sub: 'admin',
       role: 'admin',
-      email: email.trim().toLowerCase(),
+      email: normEmail,
     })
-    return c.json({ token, role: 'admin' satisfies LoginResponse['role'] })
+    setAccessTokenCookie(c, token)
+    return c.json({
+      role: 'admin' satisfies LoginResponse['role'],
+      email: normEmail,
+    })
   }
 
   const supabase = c.get('supabase')
@@ -72,12 +79,17 @@ login.post('/', async (c) => {
     return c.json({ error: 'Invalid email or password' }, 401)
   }
 
+  const userEmail = data.user.email ?? email.trim().toLowerCase()
   const token = await signAccessToken({
     sub: data.user.id,
     role: 'user',
-    email: data.user.email ?? email.trim().toLowerCase(),
+    email: userEmail,
   })
-  return c.json({ token, role: 'user' satisfies LoginResponse['role'] })
+  setAccessTokenCookie(c, token)
+  return c.json({
+    role: 'user' satisfies LoginResponse['role'],
+    email: userEmail,
+  })
 })
 
 export { login }

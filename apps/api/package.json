@@ -1,0 +1,21 @@
+{
+  "name": "@openchat/api",
+  "type": "module",
+  "private": true,
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "dev": "tsx watch src/dev.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "hono": "^4.7.0"
+  },
+  "devDependencies": {
+    "@hono/node-server": "^1.14.0",
+    "@types/node": "^20.11.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

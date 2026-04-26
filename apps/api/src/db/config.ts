@@ -1,6 +1,7 @@
 import { createMiddleware } from 'hono/factory'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { Pool } from 'pg'
+import type { AppVariables } from '../middleware/auth'
 
 const supabaseUrl = process.env.SUPABASE_URL?.trim()
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY?.trim()
@@ -11,16 +12,16 @@ export function isSupabaseConfigured(): boolean {
 
 export type HonoSupabase = SupabaseClient
 
-export const supabaseMiddleware = createMiddleware<{
-  Variables: { supabase: HonoSupabase | null }
-}>(async (c, next) => {
-  if (!isSupabaseConfigured()) {
-    c.set('supabase', null)
-  } else {
-    c.set('supabase', createClient(supabaseUrl!, supabaseAnonKey!))
-  }
-  await next()
-})
+export const supabaseMiddleware = createMiddleware<{ Variables: AppVariables }>(
+  async (c, next) => {
+    if (!isSupabaseConfigured()) {
+      c.set('supabase', null)
+    } else {
+      c.set('supabase', createClient(supabaseUrl!, supabaseAnonKey!))
+    }
+    await next()
+  },
+)
 
 /** 与 DDL 中一致为 `chat_rooms`（非单数 chat_room） */
 export const CHAT_ROOMS_TABLE = 'chat_rooms'

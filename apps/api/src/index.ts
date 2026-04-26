@@ -1,8 +1,11 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
-import { isSupabaseConfigured, supabaseMiddleware, type HonoSupabase } from './db/config'
+import { isSupabaseConfigured, supabaseMiddleware } from './db/config'
+import type { AppVariables } from './middleware/auth'
+import { admin } from './routes/admin'
+import { login } from './routes/login'
 
-const app = new Hono<{ Variables: { supabase: HonoSupabase | null } }>()
+const app = new Hono<{ Variables: AppVariables }>()
   .basePath('/api')
   .use(
     '/*',
@@ -26,6 +29,8 @@ const app = new Hono<{ Variables: { supabase: HonoSupabase | null } }>()
     }),
   )
   .get('/version', (c) => c.json({ version: '0.1.0' }))
+  .route('/login', login)
+  .route('/admin', admin)
 
 export { app }
 export type App = typeof app

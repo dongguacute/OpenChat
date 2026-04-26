@@ -1,5 +1,13 @@
-import { serve } from '@hono/node-server'
-import { app } from './index'
+import { config as loadEnv } from 'dotenv'
+import { resolve, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const apiRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+loadEnv({ path: resolve(apiRoot, '.env') })
+loadEnv({ path: resolve(apiRoot, '.env.local') })
+
+const { serve } = await import('@hono/node-server')
+const { app } = await import('./index')
 
 const port = Number(process.env.PORT) || 8787
 

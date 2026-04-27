@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { createClient } from '@supabase/supabase-js'
 import { Hono } from 'hono'
 import { getCookie } from 'hono/cookie'
@@ -8,10 +9,19 @@ import {
   setSupabaseRefreshCookie,
   SUPABASE_REFRESH_COOKIE_NAME,
 } from '../lib/auth-cookie'
-import { optionalAuth, type AppVariables } from '../middleware/auth'
+import { optionalAuth, requireAuth, type AppVariables } from '../middleware/auth'
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+const CHAT_IMAGES_BUCKET = 'chat-images'
+const IMAGE_MAX_BYTES = 5 * 1024 * 1024
+const MIME_TO_EXT = new Map<string, string>([
+  ['image/jpeg', 'jpg'],
+  ['image/png', 'png'],
+  ['image/gif', 'gif'],
+  ['image/webp', 'webp'],
+])
 
 type Err403 = { error: string; status: 403 }
 
@@ -324,7 +334,7 @@ chatroom.get('/rooms/:roomId/messages', async (c) => {
     }
     const { data: rows, error: msgErr } = await service
       .from('chat_messages')
-      .select('id, room_id, user_id, content, created_at')
+      .select('id, room_id, user_id, content, image_path, created_at')
       .eq('room_id', roomId)
       .gt('created_at', afterRow.created_at)
       .order('created_at', { ascending: true })
@@ -337,7 +347,7 @@ chatroom.get('/rooms/:roomId/messages', async (c) => {
 
   const { data: descRows, error: msgErr } = await service
     .from('chat_messages')
-    .select('id, room_id, user_id, content, created_at')
+    .select('id, room_id, user_id, content, image_path, created_at')
     .eq('room_id', roomId)
     .order('created_at', { ascending: false })
     .limit(limit)
@@ -346,6 +356,81 @@ chatroom.get('/rooms/:roomId/messages', async (c) => {
   }
   const chrono = [...(descRows ?? [])].reverse()
   return c.json({ messages: chrono })
+})
+
+/**
+ * 图片存入 Storage（路径 {room_id}/…），行写入 `chat_messages.image_path` 与 `room_id` 外键，仅房间参与者可写；路由使用 requireAuth + 服务端 participant 校验。
+ */
+chatroom.post('/rooms/:roomId/images', requireAuth, async (c) => {
+  const service = createServiceSupabase()
+  if (!service) {
+    return c.json({ error: '服务未配置' }, 500)
+  }
+  const roomId = c.req.param('roomId')?.trim() ?? ''
+  if (!roomId || !UUID_RE.test(roomId)) {
+    return c.json({ error: 'invalid room id' }, 400)
+  }
+  const me = getMyUserId(c)
+  if (!me.ok) {
+    return c.json({ error: me.res.error }, me.res.status)
+  }
+  const { data: part, error: pErr } = await service
+    .from('chat_room_participants')
+    .select('user_id')
+    .eq('room_id', roomId)
+    .eq('user_id', me.userId)
+    .maybeSingle()
+  if (pErr) {
+    return c.json({ error: pErr.message }, 400)
+  }
+  if (!part) {
+    return c.json({ error: '无权在此房间发图片' }, 403)
+  }
+  let body: Record<string, unknown>
+  try {
+    body = (await c.req.parseBody({ all: true })) as Record<string, unknown>
+  } catch {
+    return c.json({ error: '无效表单' }, 400)
+  }
+  const raw = body['file']
+  if (!raw || typeof raw !== 'object' || !('arrayBuffer' in raw)) {
+    return c.json({ error: '请上传 file 字段' }, 400)
+  }
+  const file = raw as File
+  const buf = Buffer.from(await file.arrayBuffer())
+  if (buf.length > IMAGE_MAX_BYTES) {
+    return c.json({ error: '图片最大 5MB' }, 400)
+  }
+  const mime = (typeof file.type === 'string' && file.type) || 'application/octet-stream'
+  const ext = MIME_TO_EXT.get(mime)
+  if (!ext) {
+    return c.json({ error: '仅支持 JPEG、PNG、GIF、WebP' }, 400)
+  }
+  const objectPath = `${roomId}/${randomUUID()}.${ext}`
+  const { error: upErr } = await service.storage
+    .from(CHAT_IMAGES_BUCKET)
+    .upload(objectPath, buf, { contentType: mime, upsert: false })
+  if (upErr) {
+    return c.json({ error: upErr.message }, 400)
+  }
+  const capRaw = body['caption']
+  const caption =
+    typeof capRaw === 'string' ? capRaw.trim().slice(0, 2000) : ''
+  const { data: inserted, error: insErr } = await service
+    .from('chat_messages')
+    .insert({
+      room_id: roomId,
+      user_id: me.userId,
+      content: caption,
+      image_path: objectPath,
+    })
+    .select('id, room_id, user_id, content, image_path, created_at')
+    .single()
+  if (insErr) {
+    void service.storage.from(CHAT_IMAGES_BUCKET).remove([objectPath])
+    return c.json({ error: insErr.message }, 400)
+  }
+  return c.json({ message: inserted })
 })
 
 chatroom.post('/rooms/:roomId/messages', async (c) => {
@@ -377,7 +462,7 @@ chatroom.post('/rooms/:roomId/messages', async (c) => {
     const { data: inserted, error: insErr } = await service
       .from('chat_messages')
       .insert({ room_id: roomId, user_id: guest.userId, content })
-      .select('id, room_id, user_id, content, created_at')
+      .select('id, room_id, user_id, content, image_path, created_at')
       .single()
     if (insErr) {
       return c.json({ error: insErr.message }, 400)
@@ -404,7 +489,7 @@ chatroom.post('/rooms/:roomId/messages', async (c) => {
   const { data: inserted, error: insErr } = await service
     .from('chat_messages')
     .insert({ room_id: roomId, user_id: me.userId, content })
-    .select('id, room_id, user_id, content, created_at')
+    .select('id, room_id, user_id, content, image_path, created_at')
     .single()
   if (insErr) {
     return c.json({ error: insErr.message }, 400)

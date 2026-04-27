@@ -69,6 +69,8 @@ export type ChatMessageRow = {
   room_id: string
   user_id: string
   content: string
+  /** Supabase Storage `chat-images` 桶内路径，首段为 room_id；有值时客户端用 JWT 换签名 URL */
+  image_path?: string | null
   created_at: string
 }
 

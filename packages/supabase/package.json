@@ -5,7 +5,13 @@
     "start": "supabase start",
     "stop": "supabase stop",
     "status": "supabase status",
-    "reset": "supabase db reset"
+    "reset": "supabase db reset",
+    "push": "supabase db push",
+    "push:url": "sh ./scripts/db-push-url.sh",
+    "push:local": "bash ./scripts/db-push-local.sh",
+    "login": "supabase login",
+    "link": "supabase link",
+    "link:env": "supabase link --project-ref $SUPABASE_PROJECT_REF -p $SUPABASE_DB_PASSWORD --yes"
   },
   "devDependencies": {
     "supabase": "^2.49.1"

@@ -21,6 +21,52 @@ import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js'
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
+const CHAT_IMAGES_BUCKET = 'chat-images'
+
+function ChatMessageImage({ path }: { path: string }) {
+  const [url, setUrl] = useState<string | null>(null)
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const s = await getChatSupabase()
+      if (cancelled || !s) return
+      const { data, error } = await s.storage
+        .from(CHAT_IMAGES_BUCKET)
+        .createSignedUrl(path, 3600)
+      if (cancelled) return
+      if (error || !data?.signedUrl) {
+        setFailed(true)
+        return
+      }
+      setUrl(data.signedUrl)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [path])
+  if (failed) {
+    return <p className="text-xs text-rose-300">无法加载图片</p>
+  }
+  if (!url) {
+    return <p className="text-xs text-zinc-500">图片加载中…</p>
+  }
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noreferrer"
+      className="mt-1 inline-block max-w-full"
+    >
+      <img
+        src={url}
+        alt=""
+        className="max-h-56 max-w-full rounded-md object-contain"
+      />
+    </a>
+  )
+}
+
 function readGuestConfig(): { roomId: string; userId: string } | null {
   const room = import.meta.env.VITE_GUEST_PUBLIC_ROOM_ID?.trim()
   const user = import.meta.env.VITE_GUEST_PUBLIC_USER_ID?.trim()
@@ -80,6 +126,7 @@ export function ChatPage() {
   const [messages, setMessages] = useState<ChatMessageRow[]>([])
   const [msgText, setMsgText] = useState('')
   const [sendBusy, setSendBusy] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [myGuestMsgIds, setMyGuestMsgIds] = useState(() => new Set<string>())
   const supabaseRef = useRef<SupabaseClient | null>(null)
   const channelRef = useRef<RealtimeChannel | null>(null)
@@ -162,7 +209,9 @@ export function ChatPage() {
           document.hidden
         ) {
           new Notification('OpenChat 新消息', {
-            body: m.content,
+            body: m.image_path
+              ? (m.content.trim() ? m.content : '[图片]')
+              : m.content,
             tag: m.id,
           })
         }
@@ -225,7 +274,9 @@ export function ChatPage() {
             Notification.permission === 'granted'
           ) {
             new Notification('OpenChat 新消息', {
-              body: row.content,
+              body: m.image_path
+                ? (m.content.trim() ? m.content : '[图片]')
+                : m.content,
               tag: row.id,
             })
           }
@@ -289,7 +340,9 @@ export function ChatPage() {
               document.hidden
             ) {
               new Notification('OpenChat 新消息', {
-                body: m.content,
+                body: m.image_path
+                  ? (m.content.trim() ? m.content : '[图片]')
+                  : m.content,
                 tag: m.id,
               })
             }
@@ -320,6 +373,34 @@ export function ChatPage() {
       window.alert(err instanceof ApiError ? err.message : '开聊失败')
     } finally {
       setOpenBusy(false)
+    }
+  }
+
+  const onSendImage = async (file: File) => {
+    if (!roomId || sendBusy || isGuest) return
+    setSendBusy(true)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const cap = msgText.trim()
+      if (cap) {
+        fd.append('caption', cap)
+      }
+      const r = await apiFetch<ChatPostMessageResponse>(
+        `/api/chat/rooms/${encodeURIComponent(roomId)}/images`,
+        { method: 'POST', body: fd },
+      )
+      setMsgText('')
+      setMessages((prev) => {
+        const next = mergeById(prev, [r.message])
+        lastIdRef.current = r.message.id
+        if (roomId) persistSyncCursor(roomId, r.message.id)
+        return next
+      })
+    } catch (err) {
+      window.alert(err instanceof ApiError ? err.message : '发送图片失败')
+    } finally {
+      setSendBusy(false)
     }
   }
 
@@ -500,17 +581,44 @@ export function ChatPage() {
                     <span className="text-xs text-zinc-500">
                       {isMessageMine(m) ? '我' : (isGuest ? '访客' : '对方')}
                     </span>
-                    <p className="whitespace-pre-wrap text-zinc-100">{m.content}</p>
+                    {m.image_path ? (
+                      <ChatMessageImage path={m.image_path} />
+                    ) : null}
+                    {m.content.trim() ? (
+                      <p className="whitespace-pre-wrap text-zinc-100">{m.content}</p>
+                    ) : null}
                   </li>
                 ))}
               </ul>
-              <form onSubmit={onSend} className="mt-3 flex gap-2">
+              <form onSubmit={onSend} className="mt-3 flex flex-wrap gap-2">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/gif,image/webp"
+                  className="sr-only"
+                  tabIndex={-1}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0]
+                    e.target.value = ''
+                    if (f) void onSendImage(f)
+                  }}
+                />
                 <input
                   className="min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-950/80 px-3 py-2 text-sm text-zinc-100"
                   value={msgText}
                   onChange={(e) => setMsgText(e.target.value)}
-                  placeholder="写一条消息…"
+                  placeholder="写一条消息…（发图可选填说明）"
                 />
+                {!isGuest && (
+                  <button
+                    type="button"
+                    disabled={sendBusy}
+                    onClick={() => fileInputRef.current?.click()}
+                    className="rounded-lg border border-zinc-600 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 disabled:opacity-50"
+                  >
+                    图片
+                  </button>
+                )}
                 <button
                   type="submit"
                   disabled={sendBusy}

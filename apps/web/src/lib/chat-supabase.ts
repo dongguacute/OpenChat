@@ -48,7 +48,14 @@ export async function getChatSupabase(): Promise<SupabaseClient | null> {
 export function subscribeChatMessages(
   supabase: SupabaseClient,
   roomId: string,
-  onInsert: (row: { id: string; room_id: string; user_id: string; content: string; created_at: string }) => void,
+  onInsert: (row: {
+    id: string
+    room_id: string
+    user_id: string
+    content: string
+    image_path: string | null
+    created_at: string
+  }) => void,
 ): RealtimeChannel {
   return supabase.channel(`room:${roomId}`)
     .on(
@@ -66,13 +73,14 @@ export function subscribeChatMessages(
           typeof n === 'object' &&
           'id' in n &&
           'user_id' in n &&
-          'content' in n
+          ('content' in n || 'image_path' in n)
         ) {
           const row = n as {
             id: string
             room_id: string
             user_id: string
             content: string
+            image_path: string | null
             created_at: string
           }
           onInsert(row)

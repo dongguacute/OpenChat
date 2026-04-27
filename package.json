@@ -11,7 +11,13 @@
     "db:start": "pnpm -C packages/supabase start",
     "db:stop": "pnpm -C packages/supabase run stop",
     "db:status": "pnpm -C packages/supabase run status",
-    "db:reset": "pnpm -C packages/supabase run reset"
+    "db:reset": "pnpm -C packages/supabase run reset",
+    "db:push": "pnpm -C packages/supabase run push",
+    "db:login": "pnpm -C packages/supabase run login",
+    "db:link": "pnpm -C packages/supabase run link",
+    "db:link:env": "pnpm -C packages/supabase run link:env",
+    "db:push:url": "pnpm -C packages/supabase run push:url",
+    "db:push:local": "pnpm -C packages/supabase run push:local"
   },
   "devDependencies": {
     "@eslint/js": "^9.19.0",

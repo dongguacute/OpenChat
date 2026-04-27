@@ -16,56 +16,16 @@ import {
   removeChannel,
   subscribeChatMessages,
 } from '@/lib/chat-supabase'
+import {
+  CHAT_IMAGE_ACCEPT,
+  CHAT_IMAGE_MAX_BYTES,
+  isChatImageFile,
+} from '@/lib/chat-constants'
+import { ChatMessageImage } from '@/components/chat-message-image'
 import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js'
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-
-const CHAT_IMAGES_BUCKET = 'chat-images'
-
-function ChatMessageImage({ path }: { path: string }) {
-  const [url, setUrl] = useState<string | null>(null)
-  const [failed, setFailed] = useState(false)
-  useEffect(() => {
-    let cancelled = false
-    void (async () => {
-      const s = await getChatSupabase()
-      if (cancelled || !s) return
-      const { data, error } = await s.storage
-        .from(CHAT_IMAGES_BUCKET)
-        .createSignedUrl(path, 3600)
-      if (cancelled) return
-      if (error || !data?.signedUrl) {
-        setFailed(true)
-        return
-      }
-      setUrl(data.signedUrl)
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [path])
-  if (failed) {
-    return <p className="text-xs text-rose-300">无法加载图片</p>
-  }
-  if (!url) {
-    return <p className="text-xs text-zinc-500">图片加载中…</p>
-  }
-  return (
-    <a
-      href={url}
-      target="_blank"
-      rel="noreferrer"
-      className="mt-1 inline-block max-w-full"
-    >
-      <img
-        src={url}
-        alt=""
-        className="max-h-56 max-w-full rounded-md object-contain"
-      />
-    </a>
-  )
-}
 
 function readGuestConfig(): { roomId: string; userId: string } | null {
   const room = import.meta.env.VITE_GUEST_PUBLIC_ROOM_ID?.trim()
@@ -170,7 +130,10 @@ export function ChatPage() {
           ? `/api/chat/rooms/${encodeURIComponent(rid)}/messages?since=${encodeURIComponent(since)}`
           : `/api/chat/rooms/${encodeURIComponent(rid)}/messages`
       const d = await apiFetch<ChatMessagesResponse>(path)
-      return d.messages
+      return d.messages.map((m) => ({
+        ...m,
+        image_path: m.image_path ?? null,
+      }))
     },
     [],
   )
@@ -264,7 +227,13 @@ export function ChatPage() {
               lastIdRef.current = row.id
               persistSyncCursor(roomId, row.id)
             }
-            return mergeById(prev, [row as ChatMessageRow])
+            return mergeById(prev, [
+              {
+                ...(row as ChatMessageRow),
+                image_path:
+                  (row as { image_path?: string | null }).image_path ?? null,
+              },
+            ])
           })
           const m = row as ChatMessageRow
           if (
@@ -376,33 +345,58 @@ export function ChatPage() {
     }
   }
 
-  const onSendImage = async (file: File) => {
-    if (!roomId || sendBusy || isGuest) return
-    setSendBusy(true)
-    try {
-      const fd = new FormData()
-      fd.append('file', file)
-      const cap = msgText.trim()
-      if (cap) {
-        fd.append('caption', cap)
+  const runUploadImages = useCallback(
+    async (files: File[]) => {
+      if (!roomId || sendBusy || isGuest || files.length === 0) return
+      const list = files.filter((f) => isChatImageFile(f))
+      if (list.length === 0) {
+        window.alert('请使用 JPEG、PNG、GIF 或 WebP 图片')
+        return
       }
-      const r = await apiFetch<ChatPostMessageResponse>(
-        `/api/chat/rooms/${encodeURIComponent(roomId)}/images`,
-        { method: 'POST', body: fd },
-      )
-      setMsgText('')
-      setMessages((prev) => {
-        const next = mergeById(prev, [r.message])
-        lastIdRef.current = r.message.id
-        if (roomId) persistSyncCursor(roomId, r.message.id)
-        return next
-      })
-    } catch (err) {
-      window.alert(err instanceof ApiError ? err.message : '发送图片失败')
-    } finally {
-      setSendBusy(false)
-    }
-  }
+      const over = list.filter((f) => f.size > CHAT_IMAGE_MAX_BYTES)
+      if (over.length > 0) {
+        window.alert(
+          `超过 5MB 未发送：${over.map((f) => f.name).join('、')}`,
+        )
+      }
+      const ok = list.filter((f) => f.size <= CHAT_IMAGE_MAX_BYTES)
+      if (ok.length === 0) return
+
+      const url = `/api/chat/rooms/${encodeURIComponent(roomId)}/images`
+      const cap = msgText.trim()
+      let captionForFirstOnly = true
+
+      setSendBusy(true)
+      try {
+        for (const file of ok) {
+          const fd = new FormData()
+          fd.append('file', file)
+          if (captionForFirstOnly && cap) {
+            fd.append('caption', cap)
+            captionForFirstOnly = false
+          }
+          const r = await apiFetch<ChatPostMessageResponse>(url, {
+            method: 'POST',
+            body: fd,
+          })
+          setMessages((prev) => {
+            const next = mergeById(prev, [r.message])
+            lastIdRef.current = r.message.id
+            if (roomId) persistSyncCursor(roomId, r.message.id)
+            return next
+          })
+        }
+        if (cap) {
+          setMsgText('')
+        }
+      } catch (err) {
+        window.alert(err instanceof ApiError ? err.message : '发送图片失败')
+      } finally {
+        setSendBusy(false)
+      }
+    },
+    [roomId, sendBusy, isGuest, msgText],
+  )
 
   const onSend = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -473,7 +467,7 @@ export function ChatPage() {
         <p className="mt-1 text-pretty text-sm text-zinc-400">
           {isGuest
             ? '当前为访客模式：仅可访问环境变量中配置的公开房间，通过 HTTP 每 2 秒轮询新消息。'
-            : '输入对方在系统中的邮箱即可开聊。消息通过 Supabase Realtime 同步；标签在后台时每 2 秒向 API 补拉、回到前台时自动补全未收到的新消息。'}
+            : '输入对方在系统中的邮箱即可开聊。消息通过 Supabase Realtime 同步；可发送图片（拖拽、粘贴或点「图片」），说明文字可选。'}
         </p>
         <p className="mt-2 text-xs text-zinc-500">
           本机可在聊天页点一次以请求浏览器通知。
@@ -561,6 +555,29 @@ export function ChatPage() {
               ? 'rounded-xl border border-zinc-800/80 bg-zinc-900/50 p-3'
               : 'rounded-xl border border-zinc-800/80 bg-zinc-900/50 p-3 md:col-span-2'
           }
+          onDragOver={
+            isGuest
+              ? undefined
+              : (e) => {
+                  if (!roomId) return
+                  e.preventDefault()
+                  e.stopPropagation()
+                  e.dataTransfer.dropEffect = 'copy'
+                }
+          }
+          onDrop={
+            isGuest
+              ? undefined
+              : (e) => {
+                  if (!roomId) return
+                  e.preventDefault()
+                  e.stopPropagation()
+                  const list = Array.from(e.dataTransfer.files ?? []).filter(
+                    (f) => isChatImageFile(f),
+                  )
+                  if (list.length > 0) void runUploadImages(list)
+                }
+          }
         >
           {!roomId ? (
             <p className="text-sm text-zinc-500">选择左侧会话或先开聊。</p>
@@ -582,7 +599,10 @@ export function ChatPage() {
                       {isMessageMine(m) ? '我' : (isGuest ? '访客' : '对方')}
                     </span>
                     {m.image_path ? (
-                      <ChatMessageImage path={m.image_path} />
+                      <ChatMessageImage
+                        path={m.image_path}
+                        mine={isMessageMine(m)}
+                      />
                     ) : null}
                     {m.content.trim() ? (
                       <p className="whitespace-pre-wrap text-zinc-100">{m.content}</p>
@@ -594,25 +614,38 @@ export function ChatPage() {
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept="image/jpeg,image/png,image/gif,image/webp"
+                  accept={CHAT_IMAGE_ACCEPT}
+                  multiple
                   className="sr-only"
                   tabIndex={-1}
                   onChange={(e) => {
-                    const f = e.target.files?.[0]
+                    const list = Array.from(e.target.files ?? [])
                     e.target.value = ''
-                    if (f) void onSendImage(f)
+                    if (list.length > 0) void runUploadImages(list)
                   }}
                 />
                 <input
                   className="min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-950/80 px-3 py-2 text-sm text-zinc-100"
                   value={msgText}
                   onChange={(e) => setMsgText(e.target.value)}
-                  placeholder="写一条消息…（发图可选填说明）"
+                  onPaste={(e) => {
+                    if (isGuest || !roomId || sendBusy) return
+                    const files = e.clipboardData?.files
+                    if (!files?.length) return
+                    const list = Array.from(files).filter((x) =>
+                      isChatImageFile(x),
+                    )
+                    if (list.length > 0) {
+                      e.preventDefault()
+                      void runUploadImages(list)
+                    }
+                  }}
+                  placeholder="写消息或粘贴图片…（多图时说明只加在第一张）"
                 />
                 {!isGuest && (
                   <button
                     type="button"
-                    disabled={sendBusy}
+                    disabled={sendBusy || !roomId}
                     onClick={() => fileInputRef.current?.click()}
                     className="rounded-lg border border-zinc-600 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 disabled:opacity-50"
                   >
@@ -627,6 +660,12 @@ export function ChatPage() {
                   发送
                 </button>
               </form>
+              {!isGuest && roomId && (
+                <p className="mt-1.5 text-xs text-zinc-500">
+                  支持多选、拖拽多张；单张最大 5MB。手机相册/微信里是否有「原图」由
+                  系统与 App 控制，网页选图没有单独的「原图」开关，属浏览器限制。
+                </p>
+              )}
             </>
           )}
         </div>
